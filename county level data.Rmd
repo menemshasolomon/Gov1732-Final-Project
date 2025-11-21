@@ -1,0 +1,157 @@
+---
+title: "County Level Data"
+output: pdf_document
+date: "2025-11-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(stringr) 
+library(readr) 
+library(tigris)
+library(sf)
+```
+
+## Load in election data and clean
+
+
+```{r}
+props <- read_csv("Ohio Ballot Issues 2023 copy.csv")
+
+props <- props[-c(1:3), ]
+
+colnames(props) <- c(
+"County Name", "Precinct Name", "Precinct Code", "Region Name", "Media Market", "Registered Voters", "Ballots Counted", "Official Voter Turnout", "abortion_yes", "abortion_no", "weed_yes", "weed_no"
+)
+
+props_county <- props |>
+  mutate(across(
+    c("Registered Voters", "Ballots Counted",
+      "abortion_yes", "abortion_no", "weed_yes", "weed_no"),
+    ~ readr::parse_number(as.character(.x))
+  )) |>
+  group_by(`County Name`) |>
+  summarise(
+    `Registered Voters` = sum(`Registered Voters`, na.rm = TRUE),
+    `Ballots Counted`   = sum(`Ballots Counted`, na.rm = TRUE),
+    abortion_yes        = sum(abortion_yes, na.rm = TRUE),
+    abortion_no         = sum(abortion_no, na.rm = TRUE),
+    weed_yes            = sum(weed_yes, na.rm = TRUE),
+    weed_no             = sum(weed_no, na.rm = TRUE)
+  )
+
+props_county <- props_county |>
+  mutate(voter_turnout = (`Ballots Counted`/`Registered Voters`) * 100,
+         abortion_diff = abortion_yes - abortion_no, 
+         abortion_turnout = abortion_yes + abortion_no,
+         weed_diff = weed_yes - weed_no, 
+         weed_turnout = weed_yes + weed_no,
+         abortion_weed_diff = abortion_diff - weed_diff,
+         prop_turnout_diff = abortion_turnout - weed_turnout,
+         abortion_margin = (abortion_diff / abortion_turnout) * 100, 
+         weed_margin = (weed_diff / weed_turnout) * 100, 
+         diff_margin = (abortion_weed_diff / `Ballots Counted`) * 100,
+         across(c(abortion_margin, weed_margin, diff_margin), ~ round(.x, 2)))
+
+```
+
+
+# Load in shapefile data 
+
+```{r}
+ohio_sf <- st_read("ohio_county_level.shp")
+
+ohio_prop_map_df <- ohio_sf |>
+  left_join(props_county, by = c("NAME" = "County Name"))
+```
+
+
+# First Map!
+
+```{r}
+ggplot(ohio_prop_map_df) +
+geom_sf(aes(fill = diff_margin), color = NA) + scale_fill_gradient2(
+    low = "forestgreen",
+    mid = "white",
+    high = "darkviolet",
+    midpoint = 0,
+name = "Abortion – Weed\nMargin (pp)" )+
+labs(
+title = "Ohio County-Level Disparities\nAbortion vs. Marijuana Ballot Margins (2023)",
+caption = "Positive = More support for abortion than weed") + 
+  theme_minimal() + 
+  theme(panel.grid = element_blank(),
+    legend.position = "right"
+  )
+```
+
+```{r}
+ggplot(ohio_prop_map_df) +
+geom_sf(aes(fill = prop_turnout_diff), color = NA) + scale_fill_gradient2(
+    low = "forestgreen",
+    mid = "white",
+    high = "darkviolet",
+    midpoint = 0,
+name = "Abortion – Weed\nMargin (pp)" )+
+labs(
+title = "Ohio County-Level Turnout Disparities\nAbortion vs. Marijuana  (2023)",
+caption = "Positive = More turnout for abortion than weed") + 
+  theme_minimal() + 
+  theme(panel.grid = element_blank(),
+    legend.position = "right"
+  )
+```
+
+```{r}
+ggplot(ohio_prop_map_df) +
+geom_sf(aes(fill = voter_turnout), color = NA) + scale_fill_gradient2(
+    low = "white",
+    mid = "yellow1",
+    high = "orange",
+    midpoint = 50,
+name = "Turnout (%)" )+
+labs(
+title = "Ohio County-Level Turnout (2023)") + 
+  theme_minimal() + 
+  theme(panel.grid = element_blank(),
+    legend.position = "right"
+  )
+```
+
+
+```{r}
+ggplot(ohio_prop_map_df) +
+geom_sf(aes(fill = abortion_margin), color = NA) + scale_fill_gradient2(
+    low = "darkred",
+    high = "darkblue",
+    midpoint = 0,
+    name = "Abortion Margin (pp)"
+)+ labs(
+title = "Ohio Abortion Referendum (2023)" )+
+theme_minimal() + theme(
+panel.grid = element_blank(),
+    legend.position = "right"
+  )
+```
+
+```{r}
+ggplot(ohio_prop_map_df) +
+geom_sf(aes(fill = weed_margin), color = NA) + scale_fill_gradient2(
+    low = "darkred",
+    high = "darkblue",
+    midpoint = 0,
+    name = "Marijuana Margin (pp)"
+)+ labs(
+title = "Ohio Marijuana Referendum (2023)" )+
+theme_minimal() + theme(
+panel.grid = element_blank(),
+    legend.position = "right"
+  )
+```
+
