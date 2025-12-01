@@ -158,6 +158,119 @@ panel.grid = element_blank(),
 ## Looking at census data
 
 ```{r}
-AgeRace <- read_csv("AgeRace.csv")
+library(tidyverse)
+library(janitor)
+library(stringr)
+
+age_raw <- read_csv("AgeRace.csv", show_col_types = FALSE)
+meta_raw <- read_csv("ACSDP5Y2023.DP05-Column-Metadata.csv", show_col_types = FALSE)
+
+age_raw <- age_raw[-1, ]
+
+estimate_cols <- names(age_raw)[str_detect(names(age_raw), "DP\\d{2}_.+E$")]
+id_cols <- intersect(c("GEO_ID", "NAME"), names(age_raw))
+
+age_est <- age_raw |>
+  select(all_of(id_cols), all_of(estimate_cols))
+
+rename_map <- meta_raw |>
+  clean_names() |>
+  transmute(
+    var = column_name,
+    label = label
+  ) |>
+  filter(str_detect(var, "DP\\d{2}_.+E$")) |>
+  mutate(
+    label = label |>
+      str_replace_all("(?i)^Estimate!!", "") |>
+      str_replace_all("!!", " / ") |>
+      str_replace_all("[^A-Za-z0-9/ &-]+", " ") |>
+      str_squish(),
+    new_name = label |>
+      str_to_lower() |>
+      str_replace_all("/", " ") |>
+      str_replace_all("&", "and") |>
+      str_replace_all("-", " ") |>
+      str_replace_all("\\s+", "_")
+  ) |>
+  select(var, new_name) |>
+  distinct()
+
+rename_map <- rename_map |>
+  filter(str_detect(new_name, "percent"))
+
+rename_map_keep <- rename_map |>
+  filter(var %in% names(age_est)) |>
+  mutate(new_name = make.unique(new_name, sep = "_"))
+
+keep_vars <- c(id_cols, rename_map_keep$var)
+valid_map <- setNames(rename_map_keep$var, rename_map_keep$new_name)
+
+age_clean <- age_est |>
+  select(all_of(keep_vars)) |>               # only keep id + percent vars
+  rename(!!!valid_map) |>
+  mutate(
+    NAME = str_squish(NAME),
+    county = NAME |>
+      str_replace(",\\s*Ohio$", "") |>
+      str_replace("\\s*County$", "") |>
+      str_to_title()
+  ) |>
+  relocate(county, .after = NAME)
+
+age_clean <- age_clean |>
+  mutate(across(all_of(names(valid_map)), ~ as.numeric(.x)))
+
+age_clean_selective <- age_clean |>
+  select(county, percent_sex_and_age_total_population, percent_sex_and_age_total_population_male, percent_sex_and_age_total_population_female, percent_sex_and_age_total_population_under_5_years, percent_sex_and_age_total_population_5_to_9_years, percent_sex_and_age_total_population_10_to_14_years, percent_sex_and_age_total_population_15_to_19_years, percent_sex_and_age_total_population_20_to_24_years, percent_sex_and_age_total_population_25_to_34_years, percent_sex_and_age_total_population_35_to_44_years, percent_sex_and_age_total_population_45_to_54_years, percent_sex_and_age_total_population_55_to_59_years, percent_sex_and_age_total_population_60_to_64_years, percent_sex_and_age_total_population_65_to_74_years, percent_sex_and_age_total_population_75_to_84_years, percent_sex_and_age_total_population_85_years_and_over) |>
+  rename(
+    pct_total_pop = percent_sex_and_age_total_population,
+    pct_male = percent_sex_and_age_total_population_male,
+    pct_female = percent_sex_and_age_total_population_female,
+    pct_under5 = percent_sex_and_age_total_population_under_5_years,
+    pct_5_9 = percent_sex_and_age_total_population_5_to_9_years,
+    pct_10_14 = percent_sex_and_age_total_population_10_to_14_years,
+    pct_15_19 = percent_sex_and_age_total_population_15_to_19_years,
+    pct_20_24 = percent_sex_and_age_total_population_20_to_24_years,
+    pct_25_34 = percent_sex_and_age_total_population_25_to_34_years,
+    pct_35_44 = percent_sex_and_age_total_population_35_to_44_years,
+    pct_45_54 = percent_sex_and_age_total_population_45_to_54_years,
+    pct_55_59 = percent_sex_and_age_total_population_55_to_59_years,
+    pct_60_64 = percent_sex_and_age_total_population_60_to_64_years,
+    pct_65_74 = percent_sex_and_age_total_population_65_to_74_years,
+    pct_75_84 = percent_sex_and_age_total_population_75_to_84_years,
+    pct_85plus = percent_sex_and_age_total_population_85_years_and_over
+  )
+
+race_clean <- age_clean |>
+  select(county, percent_race_total_population_one_race, percent_race_total_population_one_race_white, percent_race_total_population_one_race_black_or_african_american, percent_race_total_population_one_race_american_indian_and_alaska_native, percent_race_total_population_one_race_asian, percent_race_total_population_one_race_native_hawaiian_and_other_pacific_islander, percent_hispanic_or_latino_and_race_total_population_hispanic_or_latino_of_any_race) |>
+  rename(
+    pct_one_race = percent_race_total_population_one_race,
+    pct_white = percent_race_total_population_one_race_white,
+    pct_black = percent_race_total_population_one_race_black_or_african_american,
+    pct_native_american = percent_race_total_population_one_race_american_indian_and_alaska_native,
+    pct_asian = percent_race_total_population_one_race_asian,
+    pct_pacific_islander = percent_race_total_population_one_race_native_hawaiian_and_other_pacific_islander,
+    pct_hispanic = percent_hispanic_or_latino_and_race_total_population_hispanic_or_latino_of_any_race
+  )
+
+
+
+```
+
+##Merge age and race data with existing data
+
+```{r}
+ohio_joined_age <- ohio_prop_map_df |>
+  left_join(
+    age_clean_selective,
+    by = c("NAME" = "county")
+  )
+
+ohio_joined_race <- ohio_joined_age |>
+  left_join(
+    race_clean,
+    by = c("NAME" = "county")
+  )
 ```
 
