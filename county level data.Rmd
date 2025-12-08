@@ -354,60 +354,28 @@ edu_totals <- edu_estimate2 %>%
 
   # 4) keep a clean output set with better labels
   select(
-    `Geographic Area Name`, county,
+    county,
     pop_18_24, pop_25plus, pop_18plus,
     lt_hs_18plus, hs_grad_18plus, some_coll_18plus, ba_plus_18plus
   )
 
 ```
 
+#Join edu and raw
+
 ```{r}
-library(tidyverse)
-library(stringr)
-library(janitor)
-library(readr)
+ohio_joined_race_edu <- ohio_joined_race |>
+  left_join(
+    edu_totals,
+    by = c("NAME" = "county")
+  )
+```
+
+
+
+```{r}
 
 inc_raw <- read_csv("Income.csv", show_col_types = FALSE)
-
-# If the CSV sometimes arrives with duplicate/blank names, sanitize:
-inc_raw <- inc_raw %>% remove_empty("cols")
-inc_raw <- janitor::clean_names()  # makes "Label (Grouping)" -> "label_grouping"
-
-# --- 1) Keep only Estimate columns and the label column; drop MOE entirely ---
-# Estimate/MOE live in the *column names* (e.g., "Allen County, Ohio!!Households!!Estimate")
-# The label column is the row descriptor (e.g., "Total", "$10,000 to $14,999", etc.)
-inc_est <- inc_raw %>%
-  select(
-    label_grouping,
-    matches("!!Estimate$")     # only keep ...!!Estimate
-  )
-
-# --- 2) Turn columns into tidy rows, then split composite names ---
-inc_tidy <- inc_est %>%
-  pivot_longer(
-    cols = -label_grouping,
-    names_to = "key",
-    values_to = "value"
-  ) %>%
-  separate(
-    key,
-    into = c("geography", "group", "stat"),
-    sep  = "!!",
-    fill = "right",
-    extra = "merge"
-  ) %>%
-  filter(stat == "Estimate")  # should always be Estimate now
-
-# --- 3) Clean geography -> county; keep statewide rows if you need them later ---
-inc_tidy <- inc_tidy %>%
-  mutate(
-    geography = str_squish(geography),
-    county = geography %>%
-      str_replace(",\\s*Ohio$", "") %>%
-      str_replace("\\s*County$", "") %>%
-      str_squish() %>%
-      str_to_title()
-  )
 
 ```
 
