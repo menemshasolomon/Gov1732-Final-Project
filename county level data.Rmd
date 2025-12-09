@@ -128,8 +128,8 @@ title = "Ohio County-Level Turnout (2023)") +
 ```{r}
 ggplot(ohio_prop_map_df) +
 geom_sf(aes(fill = abortion_margin), color = NA) + scale_fill_gradient2(
-    low = "darkred",
-    high = "darkblue",
+    low = "#800000",
+    high = "#002B84",
     midpoint = 0,
     name = "Abortion Margin (pp)"
 )+ labs(
@@ -139,12 +139,16 @@ panel.grid = element_blank(),
     legend.position = "right"
   )
 ```
+```{r}
+min(ohio_prop_map_df$weed_margin)
+```
+
 
 ```{r}
 ggplot(ohio_prop_map_df) +
 geom_sf(aes(fill = weed_margin), color = NA) + scale_fill_gradient2(
-    low = "darkred",
-    high = "darkblue",
+    low = "#800000",
+    high = "#002B84",
     midpoint = 0,
     name = "Marijuana Margin (pp)"
 )+ labs(
@@ -361,21 +365,92 @@ edu_totals <- edu_estimate2 %>%
 
 ```
 
-#Join edu and raw
+```{r}
+library(sf)
+library(tidyverse)
+
+inc_raw <- read_csv("Incomes_2.csv", show_col_types = FALSE) %>%
+  as_tibble()
+
+ohio_joined_race <- ohio_joined_race %>%
+  left_join(inc_raw, by = "NAME")
+
+class(ohio_joined_race)
+```
 
 ```{r}
-ohio_joined_race_edu <- ohio_joined_race |>
-  left_join(
-    edu_totals,
-    by = c("NAME" = "county")
+ohio_joined_race <- ohio_joined_race %>%
+  mutate(`2022_BFA_Percap_Income` = as.numeric(`2022_BFA_Percap_Income`))
+```
+
+```{r}
+ggplot(ohio_joined_race) +
+geom_sf(aes(fill = `2022_BFA_Percap_Income`), color = NA) + scale_fill_gradient2(
+    low = "white",
+    high = "forestgreen",
+    midpoint = min(ohio_joined_race$`2022_BFA_Percap_Income`, na.rm = TRUE),
+    name = "2022 BFA Income per Capita by County (pp)"
+)+ labs(
+title = "Ohio Incomes (2023)" )+
+theme_minimal() + theme(
+panel.grid = element_blank(),
+    legend.position = "right"
   )
 ```
 
-
-
 ```{r}
+#Our first mode: Regressing the margin difference between abortion and weed on some of our covariates:
 
-inc_raw <- read_csv("Income.csv", show_col_types = FALSE)
+diff_model <- lm(diff_margin ~ voter_turnout + pct_female + pct_white + `2022_BFA_Percap_Income`, data = ohio_joined_race)
 
+summary(diff_model)
 ```
+```{r}
+disparity_plot <- ggplot(data = ohio_joined_race, aes(x = pct_white, y = diff_margin)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    x = "Percentage White Non-Hispanic",
+    y = "Difference in Referendum Margin (Abortion - Weed)",
+    title = "County-Level Disparities in Ohio 2023 Mid Year Referenda Margins",
+    subtitle = "By Percentage White Non-Hispanic"
+  )
+
+disparity_plot
+```
+```{r}
+turnout_disparity_plot <- ggplot(data = ohio_joined_race, aes(x = voter_turnout, y = diff_margin)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    x = "Voter Turnout (County Level)",
+    y = "Difference in Referendum Margin (Abortion - Weed)",
+    title = "County-Level Disparities in Ohio 2023 Mid Year Referenda Margins",
+    subtitle = "By County Level Turnout"
+  )
+
+turnout_disparity_plot
+```
+```{r}
+abortion_income_plot <- ggplot(data = ohio_joined_race, aes(x = `2022_BFA_Percap_Income`, y = abortion_margin)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    x = "Median Income (County Level)",
+    y = "Abortion Referendum Margin",
+    title = "Income versus Abortion Margin"
+  )
+
+abortion_income_plot
+```
+```{r}
+#population-weighted regression -- trying to fix some of our ecological inference issues
+
+model_weighted <- lm(diff_margin ~ voter_turnout + pct_female + pct_white + `2022_BFA_Percap_Income`,
+                     data = ohio_joined_race,
+                     weights = `Registered Voters`)
+
+summary(model_weighted)
+```
+
 
