@@ -11,11 +11,21 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(dplyr)
+library(broom)
 library(ggplot2)
 library(stringr) 
 library(readr) 
 library(tigris)
 library(sf)
+library(ggplot2)
+library(patchwork)
+library(purrr)
+library(glmnet)
+library(janitor)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+
 ```
 
 ## Load in election data and clean
@@ -50,10 +60,13 @@ props_county <- props_county |>
   mutate(voter_turnout = (`Ballots Counted`/`Registered Voters`) * 100,
          abortion_diff = abortion_yes - abortion_no, 
          abortion_turnout = abortion_yes + abortion_no,
+         abortion_pct = (abortion_yes / abortion_turnout) * 100,
          weed_diff = weed_yes - weed_no, 
          weed_turnout = weed_yes + weed_no,
+         weed_pct = (weed_yes / weed_turnout) * 100,
          abortion_weed_diff = abortion_diff - weed_diff,
          prop_turnout_diff = abortion_turnout - weed_turnout,
+         prop_turnout_diff_pct = (prop_turnout_diff / `Ballots Counted`) *100,
          abortion_margin = (abortion_diff / abortion_turnout) * 100, 
          weed_margin = (weed_diff / weed_turnout) * 100, 
          diff_margin = (abortion_weed_diff / `Ballots Counted`) * 100,
@@ -89,11 +102,39 @@ caption = "Positive = More support for abortion than weed") +
   theme(panel.grid = element_blank(),
     legend.position = "right"
   )
+
+ggplot(ohio_prop_map_df) +
+geom_sf(aes(fill = abortion_pct), color = NA) + scale_fill_gradient2(
+    low = "white",
+    mid = "lightpink",
+    high = "darkviolet",
+    midpoint = 50,
+name = "Yes on Abortion (pp)" )+
+labs(
+title = "Ohio County-Level Vote in Favor of Abortion Legalization (2023)") + 
+  theme_minimal() + 
+  theme(panel.grid = element_blank(),
+    legend.position = "right"
+  )
+
+ggplot(ohio_prop_map_df) +
+geom_sf(aes(fill = weed_pct), color = NA) + scale_fill_gradient2(
+    low = "white",
+    mid = "lightgreen",
+    high = "forestgreen",
+    midpoint = 50,
+name = "Yes on Marijuana Legalization (pp)" )+
+labs(
+title = "Ohio County-Level Vote in Favor of Marijuana Legalization (2023)") + 
+  theme_minimal() + 
+  theme(panel.grid = element_blank(),
+    legend.position = "right"
+  )
 ```
 
 ```{r}
 ggplot(ohio_prop_map_df) +
-geom_sf(aes(fill = prop_turnout_diff), color = NA) + scale_fill_gradient2(
+geom_sf(aes(fill = prop_turnout_diff_pct), color = NA) + scale_fill_gradient2(
     low = "forestgreen",
     mid = "white",
     high = "darkviolet",
@@ -162,9 +203,6 @@ panel.grid = element_blank(),
 ## Looking at census data
 
 ```{r}
-library(tidyverse)
-library(janitor)
-library(stringr)
 
 age_raw <- read_csv("AgeRace.csv", show_col_types = FALSE)
 meta_raw <- read_csv("ACSDP5Y2023.DP05-Column-Metadata.csv", show_col_types = FALSE)
@@ -280,9 +318,6 @@ ohio_joined_race <- ohio_joined_age |>
 
 
 ```{r}
-library(tidyverse)
-library(stringr)
-
 edu_raw <- read_csv("EduAttain.csv", col_names = FALSE, show_col_types = FALSE)
 
 new_names <- edu_raw %>%
@@ -335,53 +370,241 @@ edu_totals <- edu_estimate2 %>%
     pop_25plus     = `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 25 years and over`,
     pop_18plus     = pop_18_24 + pop_25plus,
 
-    # Less than high school (18–24 "less than HS") + (25+ "less than 9th" + "9–12 no diploma")
     lt_hs_18plus   = `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 18 to 24 years!!Less than high school graduate` +
                      `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 25 years and over!!Less than 9th grade` +
                      `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 25 years and over!!9th to 12th grade, no diploma`,
 
-    # High school graduate (18–24 HS grad) + (25+ HS grad)
     hs_grad_18plus = `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 18 to 24 years!!High school graduate (includes equivalency)` +
                      `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 25 years and over!!High school graduate (includes equivalency)`,
 
-    # Some college or associate’s (18–24 some college/AA) + (25+ some college no degree + AA)
     some_coll_18plus =
                      `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 18 to 24 years!!Some college or associate's degree` +
                      `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 25 years and over!!Some college, no degree` +
                      `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 25 years and over!!Associate's degree`,
 
-    # Bachelor’s or higher (18–24 BA+) + (25+ BA + Grad/Prof)
     ba_plus_18plus = `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 18 to 24 years!!Bachelor's degree or higher` +
                      `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 25 years and over!!Bachelor's degree` +
                      `Estimate!!Total!!AGE BY EDUCATIONAL ATTAINMENT!!Population 25 years and over!!Graduate or professional degree` ) %>%
 
 
-  # 4) keep a clean output set with better labels
   select(
     county,
     pop_18_24, pop_25plus, pop_18plus,
     lt_hs_18plus, hs_grad_18plus, some_coll_18plus, ba_plus_18plus
   )
-
 ```
 
 ```{r}
-library(sf)
-library(tidyverse)
-
 inc_raw <- read_csv("Incomes_2.csv", show_col_types = FALSE) %>%
   as_tibble()
 
 ohio_joined_race <- ohio_joined_race %>%
   left_join(inc_raw, by = "NAME")
 
-class(ohio_joined_race)
 ```
+
+```{r}
+ohio_joined_race <- ohio_joined_race %>%
+  left_join(edu_totals, by = c("NAME" = "county"))
+```
+
 
 ```{r}
 ohio_joined_race <- ohio_joined_race %>%
   mutate(`2022_BFA_Percap_Income` = as.numeric(`2022_BFA_Percap_Income`))
 ```
+
+```{r}
+gender_range <- range(
+  c(ohio_joined_race$pct_male, ohio_joined_race$pct_female),
+  na.rm = TRUE
+)
+
+male_map <- ggplot(ohio_joined_race) +
+  geom_sf(aes(fill = pct_male), color = NA) +
+  scale_fill_gradient(
+    low  = "white",
+    high = "steelblue",
+    limits = gender_range,
+    name = "Percent Male"
+  ) +
+  labs(title = "Ohio Gender: Male (2023)") +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        legend.position = "none")
+
+female_map <- ggplot(ohio_joined_race) +
+  geom_sf(aes(fill = pct_female), color = NA) +
+  scale_fill_gradient(
+    low  = "white",
+    high = "tomato",
+    limits = gender_range,
+    name = "Percent Female"
+  ) +
+  labs(title = "Ohio Gender: Female (2023)") +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        legend.position = "none")
+
+male_map + female_map
+
+```
+
+```{r}
+race_cols <- c(
+  "pct_one_race",
+  "pct_white",
+  "pct_black",
+  "pct_native_american",
+  "pct_asian",
+  "pct_pacific_islander",
+  "pct_hispanic"
+)
+
+race_labels <- c(
+  "One Race",
+  "White",
+  "Black",
+  "Native American",
+  "Asian",
+  "Pacific Islander",
+  "Hispanic"
+)
+
+race_colors <- c(
+  "grey40",   # one race (homogeneity)
+  "blue",     # white
+  "orange",   # black
+  "red3",     # Native American
+  "purple",   # Asian
+  "darkgreen",# Pacific Islander
+  "maroon"    # Hispanic
+)
+
+make_race_map <- function(col, label, color) {
+  ggplot(ohio_joined_race) +
+    geom_sf(aes(fill = .data[[col]]), color = NA) +
+    scale_fill_gradient(
+      low  = "white",
+      high = color,
+      name = paste0("Percent ", label)
+    ) +
+    labs(
+      title = paste0("Ohio Race: ", label, " (2023)")
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      legend.position = "none",
+      plot.title = element_text(size = 11, face = "bold")
+    )
+}
+
+race_plots <- pmap(
+  list(col = race_cols, label = race_labels, color = race_colors),
+  make_race_map
+)
+
+race_grid <- wrap_plots(race_plots, ncol = 3)
+race_grid
+
+```
+```{r}
+age_cols <- c(
+  "pct_5_9", "pct_10_14", "pct_15_19", "pct_20_24",
+  "pct_25_34", "pct_35_44", "pct_45_54", "pct_55_59",
+  "pct_60_64", "pct_65_74", "pct_75_84"
+)
+
+age_labels <- c(
+  "5–9", "10–14", "15–19", "20–24",
+  "25–34", "35–44", "45–54", "55–59",
+  "60–64", "65–74", "75–84"
+)
+
+make_age_map <- function(col, label) {
+  ggplot(ohio_joined_race) +
+    geom_sf(aes(fill = .data[[col]]), color = NA) +
+    scale_fill_gradient(
+      low = "white",
+      high = "orange",
+      name = paste0("Percent Age ", label)
+    ) +
+    labs(
+      title = paste0("Age ", label)
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      legend.position = "none",   # remove individual legends for cleaner grid
+      plot.title = element_text(size = 12, face = "bold")
+    )
+}
+
+plots <- map2(age_cols, age_labels, make_age_map)
+
+grid <- wrap_plots(plots, ncol = 4)
+
+grid
+
+```
+```{r}
+ohio_joined_race <- ohio_joined_race |>
+  mutate(pct_lt_hs_18plus      = 100 * lt_hs_18plus      / pop_18plus,
+pct_hs_grad_18plus    = 100 * hs_grad_18plus    / pop_18plus,
+pct_some_coll_18plus  = 100 * some_coll_18plus  / pop_18plus,
+pct_ba_plus_18plus    = 100 * ba_plus_18plus    / pop_18plus)
+
+edu_cols <- c(
+  "pct_lt_hs_18plus",
+  "pct_hs_grad_18plus",
+  "pct_some_coll_18plus",
+  "pct_ba_plus_18plus"
+)
+
+edu_labels <- c(
+  "< High School",
+  "High School Grad",
+  "Some College",
+  "BA or Higher"
+)
+
+edu_colors <- c(
+  "firebrick",
+  "goldenrod",
+  "dodgerblue3",
+  "darkgreen"
+)
+
+make_edu_map <- function(col, label, color) {
+  ggplot(ohio_joined_race) +
+    geom_sf(aes(fill = .data[[col]]), color = NA) +
+    scale_fill_gradient(
+      low  = "white",
+      high = color,
+      name = paste0(label, " (18+)")
+    ) +
+    labs(
+      title = paste0("Ohio Education: ", label, " (18+)")
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      legend.position = "none",
+      plot.title = element_text(size = 11, face = "bold")
+    )
+}
+
+edu_plots <- pmap(
+  list(col = edu_cols, label = edu_labels, color = edu_colors),
+  make_edu_map
+)
+
+edu_grid <- wrap_plots(edu_plots, ncol = 2)
+edu_grid
+
+```
+
 
 ```{r}
 ggplot(ohio_joined_race) +
@@ -399,12 +622,323 @@ panel.grid = element_blank(),
 ```
 
 ```{r}
-#Our first mode: Regressing the margin difference between abortion and weed on some of our covariates:
+ohio_joined_race_2 <- ohio_joined_race |>
+  rename(inc_2022_BFA_Percap = `2022_BFA_Percap_Income`)
 
-diff_model <- lm(diff_margin ~ voter_turnout + pct_female + pct_white + `2022_BFA_Percap_Income`, data = ohio_joined_race)
+#regression models!
 
-summary(diff_model)
+# Model 1: Abortion % support
+model_abortion_pct <- lm(
+  abortion_pct ~ 
+    pct_female +
+    pct_25_34 +
+    pct_65_74 +
+    pct_white +
+    pct_black +
+    pct_hispanic +
+    inc_2022_BFA_Percap +
+    pct_hs_grad_18plus +
+    pct_ba_plus_18plus,
+  data = ohio_joined_race_2
+)
+
+summary(model_abortion_pct)
+
 ```
+
+```{r}
+coef_df_abortion <- tidy(model_abortion_pct, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%    
+  mutate(term = reorder(term, estimate)) # order by coefficient size
+
+ggplot(coef_df_abortion, aes(x = estimate, y = term)) +
+  geom_point(size = 3, color = "firebrick") +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+  labs(
+    title = "Coefficient Estimates with 95% Confidence Intervals",
+    x = "Coefficient Estimate",
+    y = "Predictor"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+```
+
+
+```{r}
+predictors <- c(
+  "pct_female",
+  "pct_25_34",
+  "pct_65_74",
+  "pct_white",
+  "pct_black",
+  "pct_hispanic",
+  "inc_2022_BFA_Percap",
+  "pct_hs_grad_18plus",
+  "pct_ba_plus_18plus"
+)
+
+
+dat <- ohio_joined_race_2 %>% st_drop_geometry()
+
+X <- model.matrix(
+  as.formula(paste("~", paste(predictors, collapse = " + "))),
+  data = dat
+)[, -1]  # drop intercept column
+
+y <- dat$abortion_pct
+
+# Fit Elastic Net using 10-fold CV
+set.seed(123)
+cv_abortion <- cv.glmnet(
+  x = X,
+  y = y,
+  alpha = 0.5,        
+  nfolds = 10,
+  standardize = TRUE
+)
+
+lambda_min_abortion <- cv_abortion$lambda.min
+lambda_1se_abortion <- cv_abortion$lambda.1se
+
+coef_abortion <- coef(cv_abortion, s = "lambda.min")
+coef_abortion
+```
+
+
+```{r}
+# Model 2: Marijuana % support
+model_weed_pct <- lm(
+  weed_pct ~ 
+    pct_female +
+    pct_25_34 +
+    pct_65_74 +
+    pct_white +
+    pct_black +
+    pct_hispanic +
+    inc_2022_BFA_Percap +
+    pct_hs_grad_18plus +
+    pct_ba_plus_18plus,
+  data = ohio_joined_race_2
+)
+
+summary(model_weed_pct)
+```
+```{r}
+coef_df_weed <- tidy(model_weed_pct, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%    
+  mutate(term = reorder(term, estimate)) # order by coefficient size
+
+ggplot(coef_df_weed, aes(x = estimate, y = term)) +
+  geom_point(size = 3, color = "firebrick") +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+  labs(
+    title = "Coefficient Estimates with 95% Confidence Intervals",
+    x = "Coefficient Estimate",
+    y = "Predictor"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+
+```{r}
+y_weed <- dat$weed_pct
+
+set.seed(123)
+cv_weed <- cv.glmnet(
+  X, y_weed,
+  alpha = 0.5,
+  nfolds = 10,
+  standardize = TRUE
+)
+
+lambda_min_weed <- cv_weed$lambda.min
+lambda_1se_weed <- cv_weed$lambda.1se
+coef_weed <- coef(cv_weed, s = "lambda.min")
+coef_weed
+
+```
+
+
+```{r}
+model_diff_margin <- lm(
+  diff_margin ~ 
+    pct_female +
+    pct_25_34 +
+    pct_65_74 +
+    pct_black +
+    pct_hispanic +
+    inc_2022_BFA_Percap +
+    pct_hs_grad_18plus +
+    pct_ba_plus_18plus,
+  data = ohio_joined_race_2
+)
+
+summary(model_diff_margin)
+
+```
+
+```{r}
+coef_df_margin <- tidy(model_diff_margin, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%    
+  mutate(term = reorder(term, estimate)) # order by coefficient size
+
+ggplot(coef_df_margin, aes(x = estimate, y = term)) +
+  geom_point(size = 3, color = "firebrick") +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+  labs(
+    title = "Coefficient Estimates with 95% Confidence Intervals",
+    x = "Coefficient Estimate",
+    y = "Predictor"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+
+```{r}
+y_diff <- dat$diff_margin
+
+set.seed(123)
+cv_diff <- cv.glmnet(
+  X, y_diff,
+  alpha = 0.5,
+  nfolds = 10,
+  standardize = TRUE
+)
+
+lambda_min_diff <- cv_diff$lambda.min
+lambda_1se_diff <- cv_diff$lambda.1se
+coef_diff <- coef(cv_diff, s = "lambda.min")
+coef_diff
+```
+
+
+```{r}
+# Model 4: Turnout difference percentage
+model_turnout_diff <- lm(
+  prop_turnout_diff_pct ~ 
+    pct_female +
+    pct_25_34 +
+    pct_65_74 +
+    pct_black +
+    pct_hispanic +
+    inc_2022_BFA_Percap +
+    pct_hs_grad_18plus +
+    pct_ba_plus_18plus,
+  data = ohio_joined_race_2
+)
+
+summary(model_turnout_diff)
+
+```
+
+```{r}
+coef_df_turnout <- tidy(model_turnout_diff, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%    
+  mutate(term = reorder(term, estimate)) # order by coefficient size
+
+ggplot(coef_df_turnout, aes(x = estimate, y = term)) +
+  geom_point(size = 3, color = "firebrick") +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+  labs(
+    title = "Coefficient Estimates with 95% Confidence Intervals",
+    x = "Coefficient Estimate",
+    y = "Predictor"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+
+```{r}
+y_turnout <- dat$prop_turnout_diff_pct
+
+set.seed(123)
+cv_turnout <- cv.glmnet(
+  X, y_turnout,
+  alpha = 0.5,
+  nfolds = 10,
+  standardize = TRUE
+)
+
+lambda_min_turnout <- cv_turnout$lambda.min
+lambda_1se_turnout <- cv_turnout$lambda.1se
+coef_turnout <- coef(cv_turnout, s = "lambda.min")
+coef_turnout
+```
+
+```{r}
+coef_table <- list(
+  abortion_pct      = coef_abortion,
+  weed_pct          = coef_weed,
+  diff_margin       = coef_diff,
+  turnout_diff_pct  = coef_turnout
+) %>%
+  map(~ as.matrix(.x)) %>%
+  map(~ data.frame(
+    term = rownames(.x),
+    coef = .x[,1],
+    row.names = NULL
+  )) %>%
+  bind_rows(.id = "model") %>%
+  pivot_wider(
+    names_from = model,
+    values_from = coef
+  ) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 4)))
+
+coef_table %>%
+  kbl(caption = "Elastic Net Coefficients at λ_min") %>%
+  kable_paper(full_width = FALSE)
+
+
+lambda_table <- tibble(
+  model = c("abortion_pct", "weed_pct", "diff_margin", "turnout_diff_pct"),
+  lambda_min = c(lambda_min_abortion, lambda_min_weed, lambda_min_diff, lambda_min_turnout),
+  lambda_1se = c(lambda_1se_abortion, lambda_1se_weed, lambda_1se_diff, lambda_1se_turnout)
+)
+
+lambda_table %>%
+  kbl(caption = "Elastic Net Optimal Lambda Values") %>%
+  kable_paper(full_width = FALSE)
+
+```
+
+```{r}
+
+plot(cv_abortion$glmnet.fit, xvar = "lambda", label = TRUE)
+title("Coefficient Paths: Abortion %", line = 2.5)
+
+plot(cv_weed$glmnet.fit, xvar = "lambda", label = TRUE)
+title("Coefficient Paths: Weed %", line = 2.5)
+
+plot(cv_diff$glmnet.fit, xvar = "lambda", label = TRUE)
+title("Coefficient Paths: Diff Margin", line = 2.5)
+
+plot(cv_turnout$glmnet.fit, xvar = "lambda", label = TRUE)
+title("Coefficient Paths: Turnout Difference %", line = 2.5)
+
+```
+
+
 ```{r}
 disparity_plot <- ggplot(data = ohio_joined_race, aes(x = pct_white, y = diff_margin)) +
   geom_jitter() +
@@ -442,15 +976,17 @@ abortion_income_plot <- ggplot(data = ohio_joined_race, aes(x = `2022_BFA_Percap
   )
 
 abortion_income_plot
-```
-```{r}
-#population-weighted regression -- trying to fix some of our ecological inference issues
 
-model_weighted <- lm(diff_margin ~ voter_turnout + pct_female + pct_white + `2022_BFA_Percap_Income`,
-                     data = ohio_joined_race,
-                     weights = `Registered Voters`)
+weed_income_plot <- ggplot(data = ohio_joined_race, aes(x = `2022_BFA_Percap_Income`, y = weed_margin)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    x = "Median Income (County Level)",
+    y = "Marijuana Referendum Margin",
+    title = "Income versus Marijuana Margin"
+  )
 
-summary(model_weighted)
+weed_income_plot
 ```
 
 
