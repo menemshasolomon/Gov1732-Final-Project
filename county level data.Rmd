@@ -608,7 +608,7 @@ geom_sf(aes(fill = `2022_BFA_Percap_Income`), color = NA) + scale_fill_gradient2
     low = "white",
     high = "forestgreen",
     midpoint = min(ohio_joined_race$`2022_BFA_Percap_Income`, na.rm = TRUE),
-    name = "2022 BFA Income per Capita by County (pp)"
+    name = "2022 BEA Income per Capita by County"
 )+ labs(
 title = "Ohio Incomes (2023)" )+
 theme_minimal() + theme(
@@ -618,21 +618,24 @@ panel.grid = element_blank(),
 ```
 
 ```{r}
+ohio_joined_race <- ohio_joined_race |>
+  mutate(non_white_pop = pct_one_race - pct_white)
+
+
 ohio_joined_race_2 <- ohio_joined_race |>
-  rename(inc_2022_BFA_Percap = `2022_BFA_Percap_Income`) |>
+  rename(inc_2022_BEA_Percap = `2022_BFA_Percap_Income`) |>
   mutate(pct_20_44 = pct_20_24 + pct_25_34 + pct_35_44,
          pct_60_84 = pct_60_64 + pct_65_74 + pct_75_84)
 
-#regression models!
 
-# Model 1: Abortion % support
+
 model_abortion_pct <- lm(
   abortion_pct ~ 
     pct_female +
     pct_20_44 +
     pct_60_84 +
-    pct_white +
-    inc_2022_BFA_Percap +
+    non_white_pop +
+    inc_2022_BEA_Percap +
     pct_ba_plus_18plus,
   data = ohio_joined_race_2,
   weights = `Registered Voters`
@@ -670,8 +673,8 @@ predictors <- c(
   "pct_female",
     "pct_20_44",
     "pct_60_84",
-    "pct_white",
-    "inc_2022_BFA_Percap",
+    "non_white_pop",
+    "inc_2022_BEA_Percap",
     "pct_ba_plus_18plus")
 
 
@@ -707,8 +710,8 @@ model_weed_pct <- lm(
     pct_female +
     pct_20_44 +
     pct_60_84 +
-    pct_white +
-    inc_2022_BFA_Percap +
+    non_white_pop +
+    inc_2022_BEA_Percap +
     pct_ba_plus_18plus,
   data = ohio_joined_race_2,
   weights = `Registered Voters`
@@ -763,8 +766,8 @@ model_diff_margin <- lm(
     pct_female +
     pct_20_44 +
     pct_60_84 +
-    pct_white +
-    inc_2022_BFA_Percap +
+    non_white_pop +
+    inc_2022_BEA_Percap +
     pct_ba_plus_18plus,
   data = ohio_joined_race_2,
   weights = `Registered Voters`
@@ -815,14 +818,13 @@ coef_diff
 
 
 ```{r}
-# Model 4: Turnout difference percentage
 model_turnout_diff <- lm(
   prop_turnout_diff_pct ~ 
     pct_female +
     pct_20_44 +
     pct_60_84 +
-    pct_white +
-    inc_2022_BFA_Percap +
+    non_white_pop +
+    inc_2022_BEA_Percap +
     pct_ba_plus_18plus,
   data = ohio_joined_race_2,
   weights = `Registered Voters`
@@ -1027,6 +1029,36 @@ ggplot(ohio_joined_race, aes(x = pct_black, y = diff_margin)) +
     subtitle = "Bivariate relationship with linear trend"
   ) +
   theme_minimal()
+
+labels <- add_lm_labels(ohio_joined_race, "non_white_pop", "diff_margin")
+
+ggplot(ohio_joined_race, aes(x = non_white_pop, y = diff_margin)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  annotate("text", x = Inf, y = Inf, label = paste(labels$eq, labels$r2, sep="\n"),
+           hjust = 1.1, vjust = 1.2, size = 4) +
+  labs(
+    x = "% Non-White",
+    y = "Abortion - Weed Margin (pp)",
+    title = "Counties with a Larger Non-White Populations Lean More Pro-Weed than Pro-Abortion",
+    subtitle = "Bivariate relationship with linear trend"
+  ) +
+  theme_minimal()
+
+labels <- add_lm_labels(ohio_joined_race, "non_white_pop", "weed_pct")
+
+ggplot(ohio_joined_race, aes(x = non_white_pop, y = weed_pct)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  annotate("text", x = Inf, y = Inf, label = paste(labels$eq, labels$r2, sep="\n"),
+           hjust = 1.1, vjust = 1.2, size = 4) +
+  labs(
+    x = "% Non-White",
+    y = "Weed Yes (pp)",
+    title = "Counties with a Larger Non-White Populations Lean More Pro-Weed",
+    subtitle = "Bivariate relationship with linear trend"
+  ) +
+  theme_minimal()
 ```
 
 
@@ -1048,9 +1080,9 @@ ggplot(ohio_joined_race, aes(x = pct_ba_plus_18plus, y = diff_margin)) +
 ```
 
 ```{r}
-labels <- add_lm_labels(ohio_joined_race_2, "inc_2022_BFA_Percap", "diff_margin")
+labels <- add_lm_labels(ohio_joined_race_2, "inc_2022_BEA_Percap", "diff_margin")
 
-ggplot(ohio_joined_race_2, aes(x = inc_2022_BFA_Percap, y = diff_margin)) +
+ggplot(ohio_joined_race_2, aes(x = inc_2022_BEA_Percap, y = diff_margin)) +
   geom_jitter() +
   geom_smooth(method = "lm", se = TRUE, color = "purple") +
   annotate("text", x = Inf, y = Inf, label = paste(labels$eq, labels$r2, sep="\n"),
